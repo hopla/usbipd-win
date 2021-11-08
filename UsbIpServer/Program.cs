@@ -489,7 +489,7 @@ a 'usbip attach' command on the Linux side.
                         var wslResult = await ProcessUtils.RunUncapturedProcessAsync(
                             WslDistributions.WslPath,
                             (distro.HasValue() ? new[] { "--distribution", distro.Value() } : Enumerable.Empty<string>()).Concat(
-                                new[] { "--", "sudo", path, "attach", $"--remote={distros.HostAddress}", $"--busid={busId.Value()}" }),
+                                new[] { "--user", "root", "--", path, "attach", $"--remote={distros.HostAddress}", $"--busid={busId.Value()}" }),
                             CancellationToken.None);
                         if (wslResult != 0)
                         {
