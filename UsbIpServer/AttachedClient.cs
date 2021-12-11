@@ -25,10 +25,11 @@ namespace UsbIpServer
     [SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Instantiated by DI")]
     sealed class AttachedClient
     {
-        public AttachedClient(ILogger<AttachedClient> logger, ClientContext clientContext)
+        public AttachedClient(ILogger<AttachedClient> logger, ClientContext clientContext, PcapNg pcap)
         {
             Logger = logger;
             ClientContext = clientContext;
+            Pcap = pcap;
 
             var tcpClient = clientContext.TcpClient;
             Stream = tcpClient.GetStream();
@@ -40,6 +41,7 @@ namespace UsbIpServer
 
         readonly ILogger Logger;
         readonly ClientContext ClientContext;
+        readonly PcapNg Pcap;
         readonly NetworkStream Stream;
         readonly DeviceFile Device;
         readonly SemaphoreSlim WriteMutex = new(1);
@@ -261,6 +263,8 @@ namespace UsbIpServer
             //   This means multiple URBs can be outstanding awaiting completion.
             //   The pending URBs can be completed out of order, but the replies must be sent atomically.
 
+            Pcap.DumpPacket(basic, submit, basic.direction == UsbIpDir.USBIP_DIR_OUT ? buf.AsSpan(payloadOffset) : ReadOnlySpan<byte>.Empty);
+
             Task ioctl;
             var pending = false;
 
@@ -414,6 +418,8 @@ namespace UsbIpServer
                     Logger.Debug($"{urb.error} -> {ConvertError(urb.error)} -> {header.ret_submit.status}");
                 }
                 Logger.Trace($"actual: {header.ret_submit.actual_length}, requested: {requestLength}");
+
+                Pcap.DumpPacket(basic, submit, header.ret_submit, basic.direction == UsbIpDir.USBIP_DIR_IN ? buf.AsSpan(payloadOffset, header.ret_submit.actual_length) : ReadOnlySpan<byte>.Empty);
 
                 await Stream.WriteAsync(header.ToBytes(), cancellationToken);
                 if (basic.direction == UsbIpDir.USBIP_DIR_IN)

@@ -26,7 +26,7 @@ namespace UsbIpServer
         const string InstallWslUrl = "https://aka.ms/installwsl";
         const string SetWslVersionUrl = "https://docs.microsoft.com/windows/wsl/basic-commands#set-wsl-version-to-1-or-2";
 
-        static readonly string Product = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyProductAttribute>()!.Product;
+        public static readonly string Product = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyProductAttribute>()!.Product;
         static readonly string Copyright = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyCopyrightAttribute>()!.Copyright;
         static readonly string ApplicationName = Path.GetFileName(Process.GetCurrentProcess().ProcessName);
 
@@ -623,6 +623,7 @@ The 'wsl detach' command is equivalent to the 'unbind' command.
                 .ConfigureServices((hostContext, services) =>
                 {
                     services.AddHostedService<Server>();
+                    services.AddSingleton<PcapNg>();
                     services.AddScoped<ClientContext>();
                     services.AddScoped<ConnectedClient>();
                     services.AddScoped<AttachedClient>();
