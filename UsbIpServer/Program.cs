@@ -255,34 +255,25 @@ Displays a list of compatible USB devices.
             app.Command("bind", (cmd) =>
             {
                 cmd.Description = "Bind device.";
-                var bindAll = cmd.Option("-a|--all", "Share all devices.", CommandOptionType.NoValue);
                 var busId = cmd.Option("-b|--busid <BUSID>", "Share device having <BUSID>.", CommandOptionType.SingleValue);
+                var force = cmd.Option("-f|--force", "Force binding; the host cannot use the device.", CommandOptionType.NoValue);
                 cmd.HelpOption("-h|--help");
                 cmd.ExtendedHelpText = $@"
-Registers one (or all) compatible USB devices for sharing, so they can be
-attached by other machines. Bound devices remain available to the local
-machine until they are attached by another machine, at which time they
-become unavailable to the local machine.
+Registers a USB device for sharing so it can be attached by other machines.
+Unless binding is forced, a bound device remains available to the local
+machine until it is attached by another machine.
 
-{OneOfRequiredText(bindAll, busId)}
+{OneOfRequiredText(busId)}
 ";
                 DefaultCmdLine(cmd);
                 cmd.OnExecute(async () =>
                 {
-                    if (!CheckOneOf(bindAll, busId) || !CheckBusId(busId) || !CheckWriteAccess())
+                    if (!CheckOneOf(busId) || !CheckBusId(busId) || !CheckWriteAccess())
                     {
                         return 1;
                     }
 
-                    int ret;
-                    if (bindAll.HasValue())
-                    {
-                        ret = await BindAllAsync(CancellationToken.None);
-                    }
-                    else
-                    {
-                        ret = await BindDeviceAsync(BusId.Parse(busId.Value()), false, CancellationToken.None);
-                    }
+                    var ret = await BindDeviceAsync(BusId.Parse(busId.Value()), false, force.HasValue(), CancellationToken.None);
                     ReportServerRunning();
                     return ret;
                 });
@@ -297,8 +288,9 @@ become unavailable to the local machine.
                 cmd.HelpOption("-h|--help");
                 cmd.ExtendedHelpText = $@"
 Unregisters one (or all) USB devices for sharing. If the device is currently
-attached, it will immediately be detached and it becomes available to the
-machine again; the remote machine will see this as a surprise removal event.
+attached, it will immediately be detached and, unless binding was forced, it
+becomes available to the local machine again; the remote machine will see this
+as a surprise removal event.
 
 {OneOfRequiredText(unbindAll, busId, guid)}
 ";
@@ -487,7 +479,7 @@ a 'usbip attach' command on the Linux side.
                             return 1;
                         }
 
-                        var bindResult = await BindDeviceAsync(BusId.Parse(busId.Value()), true, CancellationToken.None);
+                        var bindResult = await BindDeviceAsync(BusId.Parse(busId.Value()), true, false, CancellationToken.None);
                         if (bindResult != 0)
                         {
                             ReportError($"Failed to bind device with ID '{busId.Value()}'.");
@@ -633,25 +625,9 @@ The 'wsl detach' command is equivalent to the 'unbind' command.
         }
 
         /// <summary>
-        /// Worker for <code>usbipd bind --all</code>.
-        /// </summary>
-        static async Task<int> BindAllAsync(CancellationToken cancellationToken)
-        {
-            var connectedDevices = await ExportedDevice.GetAll(cancellationToken);
-            foreach (var device in connectedDevices)
-            {
-                if (!RegistryUtils.IsDeviceShared(device))
-                {
-                    RegistryUtils.ShareDevice(device, device.Description);
-                }
-            }
-            return 0;
-        }
-
-        /// <summary>
         /// Worker for <code>usbipd bind --busid <paramref name="busId"/></code>.
         /// </summary>
-        static async Task<int> BindDeviceAsync(BusId busId, bool quiet, CancellationToken cancellationToken)
+        static async Task<int> BindDeviceAsync(BusId busId, bool quiet, bool force, CancellationToken cancellationToken)
         {
             var connectedDevices = await ExportedDevice.GetAll(cancellationToken);
             var device = connectedDevices.Where(x => x.BusId == busId).SingleOrDefault();
@@ -660,7 +636,9 @@ The 'wsl detach' command is equivalent to the 'unbind' command.
                 ReportError($"There is no compatible device with busid '{busId}'.");
                 return 1;
             }
-            if (RegistryUtils.IsDeviceShared(device))
+            var isShared = RegistryUtils.IsDeviceShared(device);
+            var isForced = ConfigurationManager.HasVBoxDriver(device.InstanceId);
+            if (isShared && (force == isForced))
             {
                 // Not an error, just let the user know they just executed a no-op.
                 if (!quiet)
@@ -669,7 +647,21 @@ The 'wsl detach' command is equivalent to the 'unbind' command.
                 }
                 return 0;
             }
-            RegistryUtils.ShareDevice(device, device.Description);
+            if (!isShared)
+            {
+                RegistryUtils.ShareDevice(device, device.Description);
+            }
+            if (force != isForced)
+            {
+                if (force)
+                {
+                    NewDev.ForceVBoxDriver(device.InstanceId);
+                }
+                else
+                {
+                    NewDev.UnforceVBoxDriver(device.InstanceId);
+                }
+            }
             return 0;
         }
 
@@ -692,6 +684,7 @@ The 'wsl detach' command is equivalent to the 'unbind' command.
                 return 0;
             }
             RegistryUtils.StopSharingDevice(device);
+            NewDev.UnforceVBoxDriver(device.InstanceId);
             return 0;
         }
     }

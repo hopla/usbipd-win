@@ -9,7 +9,7 @@ using System.Net;
 using System.Security;
 using Microsoft.Win32;
 
-using static UsbIpServer.Interop.VBoxUsb;
+using static UsbIpServer.Interop.VBoxUsbMon;
 
 namespace UsbIpServer
 {
