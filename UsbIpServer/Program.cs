@@ -49,11 +49,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ");
         }
 
-        static string Truncate(this string value, int maxChars)
-        {
-            return value.Length <= maxChars ? value : string.Concat(value.AsSpan(0, maxChars - 3), "...");
-        }
-
         /// <summary>
         /// <para><see cref="CommandLineApplication"/> is rather old and uses the "old style" errors without a terminating period.</para>
         /// <para>Some WinAPI errors (originating from FormatMessage) have a terminating newline.</para>
@@ -182,8 +177,63 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             return true;
         }
 
+        static void ConsoleWriteTruncated(string text, int width, bool fill)
+        {
+            // Console: depending on terminal / font / etc. international characters can take more than 1 cell.
+            // Redirected: just assume every character has width 1.
+            var measureConsole = !Console.IsOutputRedirected;
+            if (measureConsole)
+            {
+                // We need at least 2 extra characters to be able to measure the console output:
+                // international characters may take up 2 cells, and the cursor should not wrap around yet.
+                if (Console.CursorLeft + width + 2 >= Console.WindowWidth)
+                {
+                    // The console is not wide enough; we cannot measure across line wrapping.
+                    measureConsole = false;
+                }
+            }
+            if (measureConsole)
+            {
+                var start = Console.CursorLeft;
+                foreach (var c in text)
+                {
+                    Console.Write(c);
+                    if (Console.CursorLeft - start > width)
+                    {
+                        Console.CursorLeft = start + width - 3;
+                        Console.Write("...");
+                        break;
+                    }
+                }
+                if (fill)
+                {
+                    Console.Write(new string(' ', width - (Console.CursorLeft - start)));
+                }
+            }
+            else
+            {
+                if (text.Length > width)
+                {
+                    Console.Write(text[..(width - 3)]);
+                    Console.Write("...");
+                }
+                else
+                {
+                    Console.Write(text);
+                    if (fill)
+                    {
+                        Console.Write(new string(' ', width - text.Length));
+                    }
+                }
+            }
+        }
+
         static int Main(string[] args)
         {
+            // All our own texts are ASCII only, but device descriptions support full unicode.
+            Console.InputEncoding = System.Text.Encoding.UTF8;
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+
             var app = new CommandLineApplication()
             {
                 Name = ApplicationName,
@@ -237,7 +287,9 @@ Displays a list of compatible USB devices.
                     foreach (var device in connectedDevices)
                     {
                         // NOTE: Strictly speaking, both Bus and Port can be > 99. If you have one of those, you win a prize!
-                        Console.WriteLine($@"{device.BusId,-5}  {Truncate(device.Description, 60),-60}  {
+                        Console.Write($@"{device.BusId,-5}  ");
+                        ConsoleWriteTruncated(device.Description, 60, true);
+                        Console.WriteLine($@"  {
                             (RegistryUtils.IsDeviceShared(device) ? RegistryUtils.IsDeviceAttached(device) ? "Attached" : "Shared" : "Not shared")}");
                     }
                     Console.WriteLine();
@@ -245,7 +297,9 @@ Displays a list of compatible USB devices.
                     Console.WriteLine($"{"GUID",-38}  {"BUSID",-5}  DEVICE");
                     foreach (var device in persistedDevices)
                     {
-                        Console.WriteLine($"{device.Guid,-38:B}  {device.BusId,-5}  {Truncate(device.Description, 60),-60}");
+                        Console.Write($"{device.Guid,-38:B}  {device.BusId,-5}  ");
+                        ConsoleWriteTruncated(device.Description, 60, false);
+                        Console.WriteLine();
                     }
                     ReportServerRunning();
                     return 0;
@@ -390,9 +444,11 @@ Lists all USB devices that are available for being attached into WSL.
                             var address = RegistryUtils.GetDeviceAddress(device);
                             var distro = address is not null ? distros.LookupByIPAddress(address)?.Name : null;
                             var state = isAttached ? ("Attached" + (distro is not null ? $" - {distro}" : string.Empty)) : "Not attached";
-                            var description = Truncate(device.Description, 60);
 
-                            Console.WriteLine($"{device.BusId,-5}  {description,-60}  {state}");
+                            // NOTE: Strictly speaking, both Bus and Port can be > 99. If you have one of those, you win a prize!
+                            Console.Write($@"{device.BusId,-5}  ");
+                            ConsoleWriteTruncated(device.Description, 60, true);
+                            Console.WriteLine($@"  {state}");
                         }
                         ReportServerRunning();
                         return 0;
